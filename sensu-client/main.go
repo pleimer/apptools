@@ -61,8 +61,11 @@ func main() {
 	for {
 		select {
 		case <-c:
-			cancel()
+			closeContext, closeCancel := context.WithTimeout(ctx, time.Second*5)
+			defer closeCancel()
+			sender.close(closeContext)
 			ticker.Stop()
+			cancel()
 			fmt.Println("keyboard interrupt: canceled")
 		case <-ctx.Done():
 			fmt.Println("sensu-client exited gracefully")
@@ -74,7 +77,6 @@ func main() {
 			scriptCancel()
 			if err != nil {
 				log.Fatal(err)
-				return
 			}
 
 			sendContext, sendCancel := context.WithTimeout(ctx, time.Second*5)
@@ -82,7 +84,6 @@ func main() {
 			sendCancel()
 			if err != nil {
 				log.Fatal(err)
-				return
 			}
 		}
 	}

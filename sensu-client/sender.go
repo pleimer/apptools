@@ -39,3 +39,7 @@ func (s *sender) send(ctx context.Context, message []byte) error {
 	}
 	return nil
 }
+
+func (s *sender) close(ctx context.Context) error {
+	return s.s.Close(ctx)
+}
