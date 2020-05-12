@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/signal"
 	"time"
 )
 
@@ -19,6 +20,7 @@ func main() {
 	target := flag.String("target", "", "target address e.g. /example-queue-name")
 	fileScript := flag.String("file", "", "filepath to script")
 	command := flag.String("command", "", "command to run")
+	interval := flag.Int("interval", 15, "interval at which to execute script in seconds")
 	flag.Parse()
 
 	if *fileScript == "" && *command == "" {
@@ -33,6 +35,15 @@ func main() {
 		return
 	}
 
+	ctx, cancel := context.WithCancel(context.Background())
+	c := make(chan os.Signal, 1)
+	signal.Notify(c, os.Interrupt)
+
+	defer func() {
+		signal.Stop(c)
+		cancel()
+	}()
+
 	runner := Runner{}
 	runner.LoadScriptFromCommand([]byte(*command))
 	if *fileScript != "" {
@@ -45,23 +56,34 @@ func main() {
 		return
 	}
 
-	ctx := context.Background()
-	scriptContext, scriptCancel := context.WithTimeout(ctx, time.Second*30)
+	ticker := time.NewTicker(time.Second * time.Duration(*interval))
 
-	res, err := runner.Run(scriptContext)
-	if err != nil {
-		log.Fatal(err)
-		return
+	for {
+		select {
+		case <-c:
+			cancel()
+			ticker.Stop()
+			fmt.Println("keyboard interrupt: canceled")
+		case <-ctx.Done():
+			fmt.Println("sensu-client exited gracefully")
+			return
+		case <-ticker.C:
+			scriptContext, scriptCancel := context.WithTimeout(ctx, time.Second*30)
+
+			res, err := runner.Run(scriptContext)
+			scriptCancel()
+			if err != nil {
+				log.Fatal(err)
+				return
+			}
+
+			sendContext, sendCancel := context.WithTimeout(ctx, time.Second*5)
+			err = sender.send(sendContext, res)
+			sendCancel()
+			if err != nil {
+				log.Fatal(err)
+				return
+			}
+		}
 	}
-	scriptCancel()
-
-	sendContext, sendCancel := context.WithTimeout(ctx, time.Second*5)
-	defer sendCancel()
-
-	err = sender.send(sendContext, res)
-	if err != nil {
-		log.Fatal(err)
-		return
-	}
-
 }
